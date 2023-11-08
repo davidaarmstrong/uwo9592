@@ -180,13 +180,21 @@ boot_fd.gamlss <- function(obj,
   return(out)
 }
 
-
-#' Brief summary of gamlss objects
+#' Brief summary of GAMLSS objects
 #' 
 #' @param obj A `gamlss` object
 #' @param ... currently not implemented
 #' @export
 brief <- function(obj, ...){
+  UseMethod("brief")
+}
+
+#' Brief summary of GAMLSS objects
+#' 
+#' @param obj A `gamlss` object
+#' @param ... currently not implemented
+#' @method brief gamlss
+brief.gamlss <- function(obj, ...){
   capture.output(s <- summary(obj))
   class(s) <- "brief"
   return(s)
