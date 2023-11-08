@@ -194,6 +194,7 @@ brief <- function(obj, ...){
 #' @param obj A `gamlss` object
 #' @param ... currently not implemented
 #' @method brief gamlss
+#' @export
 brief.gamlss <- function(obj, ...){
   capture.output(s <- summary(obj))
   class(s) <- "brief"
