@@ -1,4 +1,4 @@
-globalVariables(c("x", "y"))
+globalVariables(c("x", "y", "mu_fit", "mu_se", "obs", "vbl"))
 #' Create CR Plots for GAMLSS objects
 #'
 #' @param obj A `gamlss` object
@@ -374,4 +374,45 @@ makeFakeData <- function(obj, data, change){
   tmpdata2
 }
 
+#' Generate Effect Plot Data
+#' 
+#' Generate linear predictor and standard error values from GAMLSS models
+#' 
+#' @param obj A `gamlss` object
+#' @param data The data frame used to fit `obj`.
+#' @param what The moment of the data to be predicted
+#' @param ... Currently not implemented
+#' @importFrom stats get_all_vars setNames
+#' @importFrom tidyr pivot_longer
+#' @export
+tp_data <- function(obj, 
+                    data, 
+                    what = c("mu", "sigma", "nu", "tau"), 
+                    ...){
+  wht <- match.arg(what)
+  dat <- get_all_vars(obj, data)[,-1]
+  c_plot <- dat %>% 
+    mutate(obs=row_number()) %>% 
+    pivot_longer(-obs, names_to = "vbl", values_to = "x") 
+  pred <- lpred(obj, wht, type="terms", se.fit=TRUE)
+  fit <- pred$fit %>% 
+    as.data.frame() %>% 
+    mutate(obs = row_number()) %>% 
+    setNames(c(names(dat), "obs")) %>% 
+    pivot_longer(-obs, names_to = "vbl", values_to = "mu_fit") 
+  se <- pred$se.fit %>% 
+    as.data.frame() %>% 
+    mutate(obs = row_number()) %>% 
+    setNames(c(names(dat), "obs")) %>% 
+    pivot_longer(-obs, names_to = "vbl", values_to = "mu_se") 
+  c_plot$mu_fit <- mu_fit$mu_fit
+  c_plot$mu_se <- mu_se$mu_se
+  c_plot %>% 
+    group_by(vbl) %>% 
+    arrange(x) %>% 
+    ungroup() %>% 
+    group_by(vbl, x) %>% 
+    slice_head(n=1)
+  
+}
 
