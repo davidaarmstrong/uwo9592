@@ -180,23 +180,18 @@ boot_fd.gamlss <- function(obj,
   return(out)
 }
 
-#' Brief summary of GAMLSS objects
-#' 
-#' @param obj A `gamlss` object
-#' @param ... currently not implemented
-#' @export
-brief <- function(obj, ...){
-  UseMethod("brief")
-}
 
 #' Brief summary of GAMLSS objects
 #' 
-#' @param obj A `gamlss` object
+#' @param object A `gamlss` object
 #' @param ... currently not implemented
+#' @importFrom car brief 
+#' @importFrom purrr quietly
 #' @method brief gamlss
 #' @export
-brief.gamlss <- function(obj, ...){
-  capture.output(s <- summary(obj))
+brief.gamlss <- function(object, ...){
+  qsum <- quietly(summary)
+  s <- qsum(object)
   class(s) <- "brief"
   return(s)
 }
@@ -209,7 +204,27 @@ brief.gamlss <- function(obj, ...){
 #' @importFrom stats printCoefmat
 #' @export
 print.brief <- function(x, ...){
-  printCoefmat(x$result$coef.table, ...)
+  x <- x$result
+  ints <- which(rownames(x) == "(Intercept)")
+  if(length(ints) == 1){
+    l <- list(mu = x)
+  }
+  if(length(ints) == 2){
+    l <- list(mu = x[1:(ints[2]-1), , drop=FALSE],
+         sigma = x[ints[2]:nrow(x), , drop=FALSE])
+  }
+  if(length(ints) == 3){
+    l <-list(mu = x[1:(ints[2]-1), , drop=FALSE],
+         sigma = x[ints[2]:(ints[3]-1), , drop=FALSE], 
+         nu = x[ints[3]:nrow(x), , drop=FALSE])
+  }
+  if(length(ints) == 4){
+    l <-  list(mu = x[1:(ints[2]-1), , drop=FALSE],
+         sigma = x[ints[2]:(ints[3]-1), , drop=FALSE], 
+         nu = x[ints[3]:(ints[4]-1), , drop=FALSE], 
+         tau = x[ints[4]:nrow(x), , drop=FALSE])
+  }
+  print(l)
 }
 
 #' Tidy method for `comparisons` from `marginaleffects` package
@@ -407,12 +422,12 @@ tp_data <- function(obj,
   fit <- pred$fit %>% 
     as.data.frame() %>% 
     mutate(obs = row_number()) %>% 
-    setNames(c(names(dat), "obs")) %>% 
+    setNames(c(names(data), "obs")) %>% 
     pivot_longer(-obs, names_to = "vbl", values_to = "mu_fit") 
   se <- pred$se.fit %>% 
     as.data.frame() %>% 
     mutate(obs = row_number()) %>% 
-    setNames(c(names(dat), "obs")) %>% 
+    setNames(c(names(data), "obs")) %>% 
     pivot_longer(-obs, names_to = "vbl", values_to = "mu_se") 
   c_plot$mu_fit <- mu_fit$mu_fit
   c_plot$mu_se <- mu_se$mu_se
@@ -424,4 +439,53 @@ tp_data <- function(obj,
     slice_head(n=1)
   
 }
+
+#' Make between and within group data
+#' 
+#' Makes both between and within transformed variables to use in a hierarchical model
+#' @param formula Formula with DV and IVs to be transformed. 
+#' @param data A data frame the contains the variables in `formula`. 
+#' @param id Character vector giving the names of the group ID variable(s). 
+#' @importFrom stats complete.cases model.matrix na.omit var
+#' @export
+make_between_data <- function(formula, data, id){
+  vars <- get_all_vars(formula, data)
+  wc <- which(complete.cases(vars))
+  vars <- vars[wc, ]
+  idv <- NULL
+  for(i in 1:length(id)){
+    idv <- cbind(idv, data[[id[i]]])
+  }
+  if(!is.matrix(idv)){
+    idv <- matrix(idv, ncol=length(id))
+  }
+  idv <- idv[wc, , drop=FALSE]
+  for(i in 1:length(id)){
+    X <- model.matrix(~., data=vars)[,-1]
+    X <- as.data.frame(X)
+    X <- cbind(X, idv[,i]) 
+    names(X)[ncol(X)] <- "id"
+    Xm <- X %>% group_by(id) %>% summarise(across(everything(), ~mean(.x, na.rm=TRUE)))
+    names(Xm)[-1] <- paste0(names(Xm)[-1], "_b", i)
+    vars$id <- idv[,i]
+    if(i == 1){
+      out <- X
+    }
+    out <- left_join(out, Xm, by="id")
+    dv <- names(model.frame(formula, data))[1]
+    transvars <- grep(paste0("\\_b",i), names(out), value=TRUE)
+    transvars <- gsub(paste0("\\_b",i), "", transvars)
+    transvars <- ifelse(transvars == dv, NA, transvars)
+    transvars <- na.omit(transvars)
+    for(j in 1:length(transvars)){
+      out[[paste0(transvars[j], "_w", i)]] <- out[[transvars[j]]] - out[[paste0(transvars[j], "_b", i)]]
+    }
+    v <- apply(out, 2, var, na.rm=TRUE)
+    v["id"] <- 1
+    if(any(v == 0))out <- out[,-which(v == 0)]
+    out <- out[,-which(names(out) == paste0(dv, "_b", i))]
+    names(out) <- gsub("id", id[i], names(out))
+  }
+  return(out)
+}   
 
