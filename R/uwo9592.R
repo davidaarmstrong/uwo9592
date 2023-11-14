@@ -183,15 +183,15 @@ boot_fd.gamlss <- function(obj,
 
 #' Brief summary of GAMLSS objects
 #' 
-#' @param object A `gamlss` object
+#' @param obj A `gamlss` object
 #' @param ... currently not implemented
 #' @importFrom car brief 
 #' @importFrom purrr quietly
 #' @method brief gamlss
 #' @export
-brief.gamlss <- function(object, ...){
+brief.gamlss <- function(obj, ...){
   qsum <- quietly(summary)
-  s <- qsum(object)
+  s <- qsum(obj)
   class(s) <- "brief"
   return(s)
 }
@@ -224,7 +224,8 @@ print.brief <- function(x, ...){
          nu = x[ints[3]:(ints[4]-1), , drop=FALSE], 
          tau = x[ints[4]:nrow(x), , drop=FALSE])
   }
-  print(l)
+  out <- lapply(l, printCoefmat)
+  out
 }
 
 #' Tidy method for `comparisons` from `marginaleffects` package
@@ -422,12 +423,12 @@ tp_data <- function(obj,
   fit <- pred$fit %>% 
     as.data.frame() %>% 
     mutate(obs = row_number()) %>% 
-    setNames(c(names(data), "obs")) %>% 
+    setNames(c(names(dat), "obs")) %>% 
     pivot_longer(-obs, names_to = "vbl", values_to = "mu_fit") 
   se <- pred$se.fit %>% 
     as.data.frame() %>% 
     mutate(obs = row_number()) %>% 
-    setNames(c(names(data), "obs")) %>% 
+    setNames(c(names(dat), "obs")) %>% 
     pivot_longer(-obs, names_to = "vbl", values_to = "mu_se") 
   c_plot$mu_fit <- mu_fit$mu_fit
   c_plot$mu_se <- mu_se$mu_se
@@ -440,52 +441,118 @@ tp_data <- function(obj,
   
 }
 
-#' Make between and within group data
-#' 
-#' Makes both between and within transformed variables to use in a hierarchical model
-#' @param formula Formula with DV and IVs to be transformed. 
-#' @param data A data frame the contains the variables in `formula`. 
-#' @param id Character vector giving the names of the group ID variable(s). 
-#' @importFrom stats complete.cases model.matrix na.omit var
-#' @export
-make_between_data <- function(formula, data, id){
-  vars <- get_all_vars(formula, data)
-  wc <- which(complete.cases(vars))
-  vars <- vars[wc, ]
-  idv <- NULL
-  for(i in 1:length(id)){
-    idv <- cbind(idv, data[[id[i]]])
-  }
-  if(!is.matrix(idv)){
-    idv <- matrix(idv, ncol=length(id))
-  }
-  idv <- idv[wc, , drop=FALSE]
-  for(i in 1:length(id)){
-    X <- model.matrix(~., data=vars)[,-1]
-    X <- as.data.frame(X)
-    X <- cbind(X, idv[,i]) 
-    names(X)[ncol(X)] <- "id"
-    Xm <- X %>% group_by(id) %>% summarise(across(everything(), ~mean(.x, na.rm=TRUE)))
-    names(Xm)[-1] <- paste0(names(Xm)[-1], "_b", i)
-    vars$id <- idv[,i]
-    if(i == 1){
-      out <- X
-    }
-    out <- left_join(out, Xm, by="id")
-    dv <- names(model.frame(formula, data))[1]
-    transvars <- grep(paste0("\\_b",i), names(out), value=TRUE)
-    transvars <- gsub(paste0("\\_b",i), "", transvars)
-    transvars <- ifelse(transvars == dv, NA, transvars)
-    transvars <- na.omit(transvars)
-    for(j in 1:length(transvars)){
-      out[[paste0(transvars[j], "_w", i)]] <- out[[transvars[j]]] - out[[paste0(transvars[j], "_b", i)]]
-    }
-    v <- apply(out, 2, var, na.rm=TRUE)
-    v["id"] <- 1
-    if(any(v == 0))out <- out[,-which(v == 0)]
-    out <- out[,-which(names(out) == paste0(dv, "_b", i))]
-    names(out) <- gsub("id", id[i], names(out))
-  }
-  return(out)
-}   
 
+#' Within Group Transformation Function
+#' 
+#' Performs within transformation on `x` within the groups of `id`.  If `x` is numeric, 
+#' then `means` should either be `NULL` or a named vector of means with the names of the
+#' elements have corresponding elements in `id`.  If `x` is a factor, then `means` should
+#' be an `id` by levels of `x` matrix giving the proportion of observations in each category
+#' of `x` for each different value of `id`.  If `means` is `NULL`, it will be calculated 
+#' internally and then passed to the function. 
+#' @param x A variable whose within transformation you want to calculate. This should be a vector of values, not a variable name. 
+#' @param id The grouping variable within which the transformation be performed. 
+#' @param means An optional vector of matrix of means depending on the class of `x`. 
+#' @param ... Currently not implemented. 
+#' @export
+win <- function(x, id, means=NULL, ...){
+  if(is.null(means)){
+    tmp <- wint(x, id)
+    means <- attr(tmp, "means")
+    win(x, id, means=means)
+  }else{
+    wint(x, id, means=means)
+  }
+}
+
+#' Performs within transformation 
+#' 
+#' @param x A variable whose within transformation you want to calculate. This should be a vector of values, not a variable name. 
+#' @param id The grouping variable within which the transformation be performed. 
+#' @param means An optional vector of matrix of means depending on the class of `x`. 
+#' @param ... Currently not implemented. 
+wint <- function(x, id, means=NULL, ...){
+  UseMethod("wint")
+}
+
+
+#' Numeric method for `wint`
+#' @param x A variable whose within transformation you want to calculate. This should be a vector of values, not a variable name. 
+#' @param id The grouping variable within which the transformation be performed. 
+#' @param means An optional vector of matrix of means depending on the class of `x`. 
+#' @param ... Currently not implemented. 
+#' @method wint numeric
+wint.numeric <- function(x, id, means=NULL, ...){
+  if(is.factor(id))id <- droplevels(id)
+  tmp <- data.frame(x=x, id=id)
+  if(!is.null(means)){
+    mns <- data.frame(xbar = means, id = names(means))
+    if(is.numeric(id)){
+      mns$id <- as.numeric(mns$id)
+    }
+    mvec <- mns$xbar
+    names(mvec) <- mns$id
+    tmp <- left_join(tmp, mns, by = join_by(id))
+    tmp <- tmp %>% mutate(wn = x - xbar)
+  }else{
+    tmp <- tmp %>% group_by(id) %>% mutate(xbar = mean(x)) %>% ungroup() %>% mutate(wn = x-xbar)
+    mns <- tmp %>% group_by(id) %>% slice_head(n=1)
+    mvec <- mns$xbar
+    names(mvec) <- mns$id
+  }
+  out <- tmp %>% select(wn) %>% as.matrix()
+  attr(out, "means") <- mvec
+  attr(out, "class") <- "win"
+  out
+  #structure(out, class=c("win", "matrix"))
+}
+#' Factor method for `wint`
+#' @param x A variable whose within transformation you want to calculate. This should be a vector of values, not a variable name. 
+#' @param id The grouping variable within which the transformation be performed. 
+#' @param means An optional vector of matrix of means depending on the class of `x`. 
+#' @param ... Currently not implemented. 
+#' @method wint factor
+wint.factor <- function(x, id, means=NULL, ...){
+  if(is.factor(id))id <- droplevels(id)
+  X <- model.matrix(~x-1)
+  if(!is.null(means)){
+    tmp <- data.frame(id=id)
+    Xb <- left_join(tmp, as_tibble(means, rownames= "id"), by=join_by(id))
+    Xb <- Xb %>% select(-id) %>% as.matrix()
+    Xw <- X - Xb[,colnames(X), drop=FALSE]
+    Xw <- Xw[,-1, drop=FALSE]
+    mns <- means
+  }else{
+    aux <- lm(X ~ id)
+    Xw <- aux$residuals[,-1, drop=FALSE]
+    Xb <- aux$fitted[,-1, drop=FALSE]
+    mns <- by(X, list(id), colMeans)
+    mns <- do.call(rbind, mns)
+  }
+  out <- Xw
+  attr(out, "means") <- mns
+  attr(out, "class") <- "win"
+  out
+  #structure(out, class=c("win", "matrix"))
+}
+#' Predict method for win
+#' 
+#' @param object An object of class `win`
+#' @param newdata An optional data frame with which to generate the predictions
+#' @method predict win
+predict.win <- function(object, newdata, ...){
+  if(missing(newdata))
+    object
+  else win(newdata, means = attr(object, "means"))
+}
+
+#' Makepredictcall method for win
+#' @param var A variable
+#' @param call A term in the formula, as a call. 
+#' @method makepredictcall win
+makepredictcall.win <- function(var, call){
+  if (as.character(call)[1L] == "win" || (is.call(call) && 
+                                          identical(eval(call[[1L]]), win))) 
+    call$means <- attr(var, "means")
+  call
+}

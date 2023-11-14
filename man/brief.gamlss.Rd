@@ -4,10 +4,10 @@
 \alias{brief.gamlss}
 \title{Brief summary of GAMLSS objects}
 \usage{
-\method{brief}{gamlss}(object, ...)
+\method{brief}{gamlss}(obj, ...)
 }
 \arguments{
-\item{object}{A `gamlss` object}
+\item{obj}{A `gamlss` object}
 
 \item{...}{currently not implemented}
 }
