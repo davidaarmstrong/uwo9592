@@ -1,4 +1,4 @@
-globalVariables(c("x", "y", "mu_fit", "mu_se", "obs", "vbl"))
+globalVariables(c("x", "y", "mu_fit", "mu_se", "obs", "vbl", "wn", "xbar"))
 #' Create CR Plots for GAMLSS objects
 #'
 #' @param obj A `gamlss` object
@@ -183,15 +183,15 @@ boot_fd.gamlss <- function(obj,
 
 #' Brief summary of GAMLSS objects
 #' 
-#' @param obj A `gamlss` object
+#' @param object A `gamlss` object
 #' @param ... currently not implemented
 #' @importFrom car brief 
 #' @importFrom purrr quietly
 #' @method brief gamlss
 #' @export
-brief.gamlss <- function(obj, ...){
+brief.gamlss <- function(object, ...){
   qsum <- quietly(summary)
-  s <- qsum(obj)
+  s <- qsum(object)
   class(s) <- "brief"
   return(s)
 }
@@ -511,6 +511,7 @@ wint.numeric <- function(x, id, means=NULL, ...){
 #' @param id The grouping variable within which the transformation be performed. 
 #' @param means An optional vector of matrix of means depending on the class of `x`. 
 #' @param ... Currently not implemented. 
+#' @importFrom stats lm model.matrix
 #' @method wint factor
 wint.factor <- function(x, id, means=NULL, ...){
   if(is.factor(id))id <- droplevels(id)
@@ -535,10 +536,12 @@ wint.factor <- function(x, id, means=NULL, ...){
   out
   #structure(out, class=c("win", "matrix"))
 }
+
 #' Predict method for win
 #' 
 #' @param object An object of class `win`
 #' @param newdata An optional data frame with which to generate the predictions
+#' @param ... Other arguments to be passed down
 #' @method predict win
 predict.win <- function(object, newdata, ...){
   if(missing(newdata))
@@ -556,3 +559,122 @@ makepredictcall.win <- function(var, call){
     call$means <- attr(var, "means")
   call
 }
+
+#' Between Group Transformation Function
+#' 
+#' Performs between transformation on `x` within the groups of `id`.  If `x` is numeric, 
+#' then `means` should either be `NULL` or a named vector of means with the names of the
+#' elements have corresponding elements in `id`.  If `x` is a factor, then `means` should
+#' be an `id` by levels of `x` matrix giving the proportion of observations in each category
+#' of `x` for each different value of `id`.  If `means` is `NULL`, it will be calculated 
+#' internally and then passed to the function. 
+#' @param x A variable whose within transformation you want to calculate. This should be a vector of values, not a variable name. 
+#' @param id The grouping variable within which the transformation be performed. 
+#' @param means An optional vector of matrix of means depending on the class of `x`. 
+#' @param ... Currently not implemented. 
+#' @export
+bwn <- function(x, id, means=NULL, ...){
+  if(is.null(means)){
+    tmp <- bwnt(x, id)
+    means <- attr(tmp, "means")
+    bwn(x, id, means=means)
+  }else{
+    bwnt(x, id, means=means)
+  }
+  
+}
+
+#' Performs Between Transformation
+#' 
+#' @param x A variable whose between transformation you want to calculate. This should be a vector of values, not a variable name. 
+#' @param id The grouping variable between which the transformation be performed. 
+#' @param means An optional vector of matrix of means depending on the class of `x`. 
+#' @param ... Currently not implemented. 
+#' @export
+bwnt <- function(x, id, means=NULL, ...){
+  UseMethod("bwnt")
+}
+
+#' Numeric method for `bwnt`
+#' @param x A variable whose between transformation you want to calculate. This should be a vector of values, not a variable name. 
+#' @param id The grouping variable between which the transformation be performed. 
+#' @param means An optional vector of matrix of means depending on the class of `x`. 
+#' @param ... Currently not implemented. 
+#' @method wint numeric
+bwnt.numeric <- function(x, id, means=NULL, ...){
+  if(is.factor(id))id <- droplevels(id)
+  tmp <- data.frame(x=x, id=id)
+  if(!is.null(means)){
+    mns <- data.frame(bwn = means, id = names(means))
+    if(is.numeric(id)){
+      mns$id <- as.numeric(mns$id)
+    }
+    mvec <- mns$xbar
+    names(mvec) <- mns$id
+    tmp <- left_join(tmp, mns, by = join_by(id))
+  }else{
+    tmp <- tmp %>% group_by(id) %>% mutate(bwn = mean(x)) %>% ungroup() 
+    mns <- tmp %>% group_by(id) %>% slice_head(n=1)
+    mvec <- mns$xbar
+    names(mvec) <- mns$id
+  }
+  out <- tmp %>% select(bwn) %>% as.matrix()
+  attr(out, "means") <- mvec
+  attr(out, "class") <- "bwn"
+  out
+  #structure(out, class=c("bwn", "matrix"))
+}
+
+#' Factor method for `bwnt`
+#' @param x A variable whose between transformation you want to calculate. This should be a vector of values, not a variable name. 
+#' @param id The grouping variable between which the transformation be performed. 
+#' @param means An optional vector of matrix of means depending on the class of `x`. 
+#' @param ... Currently not implemented. 
+#' @method wint numeric
+bwnt.factor <- function(x, id, means=NULL, ...){
+  if(is.factor(id))id <- droplevels(id)
+  X <- model.matrix(~x-1)
+  if(!is.null(means)){
+    tmp <- data.frame(id=id)
+    Xb <- left_join(tmp, as_tibble(means, rownames= "id"), by=join_by(id))
+    Xb <- Xb %>% select(-id) %>% as.matrix()
+    Xb <- Xb[,colnames(X), drop=FALSE]
+    mns <- means
+  }else{
+    aux <- lm(X ~ id)
+    Xb <- aux$fitted[,-1, drop=FALSE]
+    mns <- by(Xb, list(id), colMeans)
+    mns <- do.call(rbind, mns)
+  }
+  out <- Xb
+  attr(out, "means") <- mns
+  attr(out, "class") <- "bwn"
+  out
+  #structure(out, class=c("bwn", "matrix"))
+}
+
+#' Predict method for bwn
+#' 
+#' @param object An object of class `bwn`
+#' @param newdata An optional data frame with which to generate the predictions
+#' @param ... Other arguments to be passed down
+#' @method predict bwn
+predict.bwn <- function(object, newdata, ...){
+  if(missing(newdata))
+    object
+  else bwn(newdata, means = attr(object, "means"))
+}
+
+#' Makepredictcall method for bwn
+#' @param var A variable
+#' @param call A term in the formula, as a call. 
+#' @method makepredictcall bwn
+makepredictcall.bwn <- function(var, call){
+  if (as.character(call)[1L] == "bwn" || (is.call(call) && 
+                                          identical(eval(call[[1L]]), bwn))) 
+    call$means <- attr(var, "means")
+  call
+}
+
+
+
