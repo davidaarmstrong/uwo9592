@@ -526,7 +526,7 @@ wint.factor <- function(x, id, means=NULL, ...){
   }else{
     aux <- lm(X ~ id)
     Xw <- aux$residuals[,-1, drop=FALSE]
-    Xb <- aux$fitted[,-1, drop=FALSE]
+    Xb <- aux$fitted[, , drop=FALSE]
     mns <- by(X, list(id), colMeans)
     mns <- do.call(rbind, mns)
   }
@@ -642,7 +642,7 @@ bwnt.factor <- function(x, id, means=NULL, ...){
     mns <- means
   }else{
     aux <- lm(X ~ id)
-    Xb <- aux$fitted[,-1, drop=FALSE]
+    Xb <- aux$fitted[, , drop=FALSE]
     mns <- by(Xb, list(id), colMeans)
     mns <- do.call(rbind, mns)
   }
