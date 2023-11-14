@@ -609,13 +609,13 @@ bwnt.numeric <- function(x, id, means=NULL, ...){
     if(is.numeric(id)){
       mns$id <- as.numeric(mns$id)
     }
-    mvec <- mns$xbar
+    mvec <- mns$bwn
     names(mvec) <- mns$id
     tmp <- left_join(tmp, mns, by = join_by(id))
   }else{
     tmp <- tmp %>% group_by(id) %>% mutate(bwn = mean(x)) %>% ungroup() 
     mns <- tmp %>% group_by(id) %>% slice_head(n=1)
-    mvec <- mns$xbar
+    mvec <- mns$bwn
     names(mvec) <- mns$id
   }
   out <- tmp %>% select(bwn) %>% as.matrix()
