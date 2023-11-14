@@ -526,7 +526,7 @@ wint.factor <- function(x, id, means=NULL, ...){
   }else{
     aux <- lm(X ~ id)
     Xw <- aux$residuals[,-1, drop=FALSE]
-    Xb <- aux$fitted[, , drop=FALSE]
+    Xb <- aux$fitted[, drop=FALSE]
     mns <- by(X, list(id), colMeans)
     mns <- do.call(rbind, mns)
   }
@@ -639,6 +639,7 @@ bwnt.factor <- function(x, id, means=NULL, ...){
     Xb <- left_join(tmp, as_tibble(means, rownames= "id"), by=join_by(id))
     Xb <- Xb %>% select(-id) %>% as.matrix()
     Xb <- Xb[,colnames(X), drop=FALSE]
+    Xb <- Xb[,-1,drop=FALSE]
     mns <- means
   }else{
     aux <- lm(X ~ id)
