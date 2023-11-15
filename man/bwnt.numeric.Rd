@@ -4,7 +4,7 @@
 \alias{bwnt.numeric}
 \title{Numeric method for `bwnt`}
 \usage{
-\method{wint}{numeric}(x, id, means = NULL, ...)
+\method{bwnt}{numeric}(x, id, means = NULL, ...)
 }
 \arguments{
 \item{x}{A variable whose between transformation you want to calculate. This should be a vector of values, not a variable name.}

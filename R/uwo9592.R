@@ -1,4 +1,4 @@
-globalVariables(c("x", "y", "mu_fit", "mu_se", "obs", "vbl", "wn", "xbar"))
+globalVariables(c("x", "y", "mu_fit", "mu_se", "obs", "vbl", "wn", "xbar", "bwn", "fit", "se_fit"))
 #' Create CR Plots for GAMLSS objects
 #'
 #' @param obj A `gamlss` object
@@ -600,7 +600,7 @@ bwnt <- function(x, id, means=NULL, ...){
 #' @param id The grouping variable between which the transformation be performed. 
 #' @param means An optional vector of matrix of means depending on the class of `x`. 
 #' @param ... Currently not implemented. 
-#' @method wint numeric
+#' @method bwnt numeric
 bwnt.numeric <- function(x, id, means=NULL, ...){
   if(is.factor(id))id <- droplevels(id)
   tmp <- data.frame(x=x, id=id)
@@ -630,7 +630,7 @@ bwnt.numeric <- function(x, id, means=NULL, ...){
 #' @param id The grouping variable between which the transformation be performed. 
 #' @param means An optional vector of matrix of means depending on the class of `x`. 
 #' @param ... Currently not implemented. 
-#' @method wint numeric
+#' @method bwnt factor
 bwnt.factor <- function(x, id, means=NULL, ...){
   if(is.factor(id))id <- droplevels(id)
   X <- model.matrix(~x-1)
@@ -676,6 +676,177 @@ makepredictcall.bwn <- function(var, call){
     call$means <- attr(var, "means")
   call
 }
+
+#' Calculates Effects for Within-transformed Variables
+#' 
+#' Calculates predicted values for within-transformed variables holding
+#' all other variables constant at median/modal values (depending on whether the
+#' variable is numeric or a factor).  All variables must be either factors or 
+#' numeric, the function will fail if character variables are used.  Variables
+#' with between transformations will be held constant at each group's mean.  Currently
+#' the only option is to make the desired effect for each different random group.  
+#' Currently this only works with two-levels models that have a single random effect. 
+#' The function returns predictions on the link scale. 
+#' @param obj A `lmerMod` or `glmerMod` object - estimated with `lmer` or `glmer` from 
+#' the `lme4` package.  
+#' @param vbl A character string giving the name of a variable whose effects are to be calculated. 
+#' @param idvar A character string giving the name of the grouping variable. 
+#' @param data The data frame used to fit the original model. 
+#' @param nvals The number of values to use when varying a numeric variable.  The 
+#' values used in the prediction will be a sequence of `nvals` evenly spaced from the 
+#' minimum to the maximum of `vbl`.  Disregarded if `usevals` is specified. 
+#' @param usevals The values to use in generating predictions for numeric variables. 
+#' @param ... Other arguments that get passed down to `lme4:::predict.merMod()`. 
+#' @importFrom tidyr unnest
+#' @importFrom stats terms
+#' @importFrom rlang :=
+#' @export
+win_eff <- function(obj, vbl, idvar, data, nvals=25, usevals=NULL, ...){
+  is_fac_char <- function(x){
+    inherits(x, "factor") | inherits(x, "character")
+  }
+  modal <- function(x){
+    if(is.factor(x)){
+      levs <- levels(x)
+      tab <- table(x)
+      mlev <- names(tab)[which.max(tab)]
+      factor(mlev, levels=levs)
+    }else{
+      tab <- table(x)
+      mlev <- names(tab)[which.max(tab)]
+    }
+  }
+  X <- model.matrix(obj)
+  mf <- model.frame(obj)
+  trms <- terms(obj)
+  D <- get_all_vars(obj, data)
+  if(is.numeric(D[[vbl]])){
+    if(is.null(usevals)){
+      vals <- seq(min(D[[vbl]]), max(D[[vbl]]), length=nvals)  
+    }else{
+      vals <- usevals
+    }
+  }else{
+    vals <- factor(levels(D[[vbl]]), levels=levels(D[[vbl]])) 
+  }
+  newD <- D %>% 
+    group_by(.data[[idvar]]) %>% 
+    summarise(across(where(is_fac_char), modal),
+              across(where(is.numeric), median), 
+              {{vbl}} := list(vals)) %>% 
+    unnest({{vbl}})
+  preds <- predict(obj, newdata=newD, se.fit=TRUE, ...)
+  newD <- newD %>% 
+    mutate(fit = preds$fit, 
+           se_fit = preds$se.fit, 
+           lwr = fit - 1.96*se_fit, 
+           upr = fit + 1.95*se_fit)
+  return(newD) 
+}
+
+
+#' Calculates Effects for Between-transformed Variables
+#' 
+#' Calculates predicted values for between-transformed variables holding
+#' all other variables constant at mean values.  All within-transformed variables 
+#' will be held constant at 0, indicating an observation at the group mean. All variables must be either factors or 
+#' numeric, the function will fail if character variables are used.  
+#' Currently this only works with two-levels models that have a single random effect. The function returns
+#' the predictions on the link scale. 
+#' @param obj A `lmerMod` or `glmerMod` object - estimated with `lmer` or `glmer` from 
+#' the `lme4` package.  
+#' @param vbl A character string giving the name of a variable whose effects are to be calculated. 
+#' @param idvar A character string giving the name of the grouping variable. 
+#' @param data The data frame used to fit the original model. 
+#' @param nvals The number of values to use when varying a numeric variable.  The 
+#' values used in the prediction will be a sequence of `nvals` evenly spaced from the 
+#' minimum to the maximum of `vbl`.  
+#' @param ... Currently not implemented.  
+#' @importFrom stats sigma
+#' @importFrom lme4 getME fixef
+#' @importFrom Matrix Matrix crossprod solve tcrossprod rowSums
+#' @export
+bwn_eff <- function(obj, vbl, idvar, data, nvals = 10,  ...){
+  trms <- terms(obj)
+  mf <- model.frame(obj)
+  trm.labs <- attr(trms, "term.labels")
+  bwntrm <- grep(paste0("^bwn\\(", vbl), names(mf))
+  s <- sigma(obj)
+  L <- getME(obj, "L")
+  RX <- getME(obj, "RX")
+  RZX <- getME(obj, "RZX")
+  Lambdat <- getME(obj, "Lambdat")
+  RXtinv <- solve(t(RX))
+  LinvLambdat <- solve(L, Lambdat, system = "L")
+  Minv <- s * rbind(cbind(LinvLambdat, Matrix(0, nrow = nrow(L), 
+                                              ncol = ncol(RX))), cbind(-RXtinv %*% t(RZX) %*% LinvLambdat, 
+                                                                       RXtinv))
+  Cmat <- crossprod(Minv)
+  X <- getME(obj, "X")
+  X.col.dropped <- attr(X, "col.dropped")
+  newW <- apply(X[,grep("^win\\(", colnames(X))], 2, \(x)rep(0, length(x)))
+  X[, colnames(newW)] <- newW
+  no_t <- setdiff(1:ncol(X), c(grep("^win\\(", colnames(X)), grep("^bwn\\(", colnames(X))))
+  if(any(no_t != 1)){
+    not_X <- X[,no_t, drop=FALSE]
+    not_X <- apply(not_X, 2, \(x)rep(mean(x), length(x)))
+    X[,no_t] <- not_X
+  }
+  bwnv <- grep(paste0("^bwn\\(", vbl), colnames(X))
+  bwnvX <- X[,bwnv, drop=FALSE]
+  cmv <- colMeans(bwnvX)
+  bwnf <- grep("^bwn\\(", colnames(X))
+  bwnfX <- X[,bwnf, drop=FALSE]
+  bwnfX <- apply(bwnfX, 2, \(x)rep(mean(x), length(x)))
+  X[,bwnf] <- bwnfX
+  X <- X[1, , drop=FALSE]
+  cn <- colnames(X)
+  X <- t(sapply(1:nvals, \(i)X))
+  colnames(X) <- cn  
+  if(length(bwnv) > 1){
+    levv <- levels(data[[vbl]])
+    res <- NULL
+    for(j in seq_along(c(1, bwnv))){
+      if(j == 1){
+        s <- seq(1-max(rowSums(bwnvX)), 1-min(rowSums(bwnvX)), length=nvals)
+      }else{
+        s <- seq(min(bwnvX[,(j-1)]), max(bwnvX[,(j-1)]), length=nvals)
+      }
+      tmpX <- X
+      tmpX2 <- tmpX[,bwnv]
+      tmpX2 <- cbind(1-rowSums(tmpX2), tmpX2)
+      props <- tmpX2[1,-j]/sum(tmpX2[1,-j])
+      tmpX2[,j] <- s
+      rest <- 1-s
+      o <- outer(rest, props)
+      tmpX2[,-j] <- o
+      X[, bwnv] <- tmpX2[,colnames(X)[bwnv]]    
+      pred <- drop(X %*% fixef(obj))
+      Z <- Matrix(0, nrow = nrow(X), ncol = ncol(L))
+      ZX <- cbind(Z, X)
+      se.fit <-  sqrt(rowSums(tcrossprod(ZX, Cmat) * ZX))
+      out <- data.frame(cat = levv[j], vals=s, fit = pred, se_fit=se.fit)
+      out$lwr <- out$fit - 1.96*out$se_fit
+      out$upr <- out$fit + 1.96*out$se_fit
+      
+      res <- bind_rows(res, 
+                       out)
+      
+    }  
+  }else{
+    s <- seq(min(bwnvX), max(bwnvX), length=nvals)
+    X[,bwnv] <- s
+    pred <- drop(X %*% fixef(obj))
+    Z <- Matrix(0, nrow = nrow(X), ncol = ncol(L))
+    ZX <- cbind(Z, X)
+    se.fit <-  sqrt(rowSums(tcrossprod(ZX, Cmat) * ZX))
+    res <- data.frame(vals=s, fit = pred, se_fit=se.fit)
+    res$lwr <- res$fit - 1.96*res$se_fit
+    res$upr <- res$fit + 1.96*res$se_fit
+  }
+  return(res)
+}
+
 
 
 

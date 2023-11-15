@@ -4,7 +4,7 @@
 \alias{bwnt.factor}
 \title{Factor method for `bwnt`}
 \usage{
-\method{wint}{numeric}(x, id, means = NULL, ...)
+\method{bwnt}{factor}(x, id, means = NULL, ...)
 }
 \arguments{
 \item{x}{A variable whose between transformation you want to calculate. This should be a vector of values, not a variable name.}
