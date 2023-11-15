@@ -771,6 +771,7 @@ bwn_eff <- function(obj, vbl, idvar, data, nvals = 10,  ...){
   mf <- model.frame(obj)
   trm.labs <- attr(trms, "term.labels")
   bwntrm <- grep(paste0("^bwn\\(", vbl), names(mf))
+  ####### Taken from lme4:::predict.merMod - Start1
   s <- sigma(obj)
   L <- getME(obj, "L")
   RX <- getME(obj, "RX")
@@ -782,7 +783,9 @@ bwn_eff <- function(obj, vbl, idvar, data, nvals = 10,  ...){
                                               ncol = ncol(RX))), cbind(-RXtinv %*% t(RZX) %*% LinvLambdat, 
                                                                        RXtinv))
   Cmat <- crossprod(Minv)
-  X <- getME(obj, "X")
+  ####### End
+
+    X <- getME(obj, "X")
   X.col.dropped <- attr(X, "col.dropped")
   newW <- apply(X[,grep("^win\\(", colnames(X))], 2, \(x)rep(0, length(x)))
   X[, colnames(newW)] <- newW
