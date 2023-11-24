@@ -1,4 +1,4 @@
-globalVariables(c("x", "y", "mu_fit", "mu_se", "obs", "vbl", "wn", "xbar", "bwn", "fit", "se_fit"))
+globalVariables(c("x", "y", "mu_fit", "mu_se", "obs", "vbl", "wn", "xbar", "bwn", "fit", "se_fit", "restscore", "xj", "var"))
 #' Create CR Plots for GAMLSS objects
 #'
 #' @param obj A `gamlss` object
@@ -900,4 +900,23 @@ process_post <- function(imps, data, ...){
   return(list(orig = orig, post = post))
 }
 
+
+#' Calculates the Rest Plot for the Summated Rating Model
+#' 
+#' The rest plot plots the scale constructed using the "rest" of the data against a single excluded variable.  
+#' 
+#' @param X A matrix that was subjected to a summated rating analysis.
+#' @param ... Arguments passed to `method.args` in `geom_smooth()`. 
+#' @export 
+restplot <- function(X, ...){
+  nc <- ncol(X)
+  apdat <- lapply(1:nc, function(i)cbind(rowSums(X[,-i]), X[,i]))
+  plot.data <- as.data.frame(do.call(rbind, apdat))
+  names(plot.data) <- c("restscore", "xj")
+  plot.data$var <- rep(1:length(apdat), sapply(apdat, nrow))
+  plot.data$var <- factor(plot.data$var, labels=colnames(X))
+  ggplot(plot.data, aes(x=restscore, y=xj)) + geom_point(pch=1) + 
+    geom_smooth(method="loess", method.args=list(...)) + 
+    facet_wrap(~var) + theme_bw() + theme(aspect.ratio=1)
+}
 

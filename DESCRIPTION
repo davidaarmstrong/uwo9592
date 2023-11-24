@@ -1,7 +1,7 @@
 Package: uwo9592
 Type: Package
 Title: Supports Generalized Models in the Social and Health Sciences Course
-Version: 0.1.2
+Version: 0.1.3
 Authors@R: person("Dave", "Armstrong", email = "davearmstrong.ps@gmail.com", role = c("aut", "cre"))
 Description: A set of functions that supports the Generalized Linear Models in the Social and Health Sciences cours (POLS 9592) at the University of Western Ontario.  Generally, the functions here are mean to aid with post-model evaluation and interpretation. 
 Imports: AICcmodavg, broom, car, dplyr, gamlss, ggplot2, lme4, Matrix, mice, progress, purrr, rlang, statmod, stats, tidyr, utils
